@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SkinSafe: scan your skin, shop without regret</title>
+<style>
+:root{--bg:#faf7f4;--card:#fff;--ink:#2a2523;--mut:#7a6f69;--ok:#2e7d5b;--bad:#c0392b;--acc:#8a5a44}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1917;--card:#292524;--ink:#f5efe9;--mut:#a8a29e;--ok:#5fcf9d;--bad:#ff7b6b;--acc:#e0a98c}}
+*{box-sizing:border-box}body{margin:0;font:16px system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:720px;margin:auto;padding:20px}h1{margin:.2em 0}p.s{color:var(--mut)}
+.card{background:var(--card);border-radius:14px;padding:18px;margin:14px 0;box-shadow:0 1px 4px #0002}
+button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:11px 18px;font-size:15px;cursor:pointer}
+textarea{width:100%;min-height:90px;border-radius:10px;border:1px solid var(--mut);padding:10px;background:var(--bg);color:var(--ink)}
+.bar{height:10px;background:#8883;border-radius:6px;overflow:hidden}.bar i{display:block;height:100%}
+.row{display:grid;grid-template-columns:110px 1fr 40px;gap:10px;align-items:center;margin:8px 0}
+.tag{display:inline-block;padding:3px 9px;border-radius:20px;margin:3px;font-size:13px}
+.g{background:#2e7d5b33;color:var(--ok)}.b{background:#c0392b33;color:var(--bad)}
+.verdict{font-size:22px;font-weight:700}
+</style></head><body><main>
+<h1>SkinSafe</h1><p class="s">Step 1: scan your skin. Step 2: paste any product's ingredients. Get a clear Buy / Skip verdict for <em>your</em> skin.</p>
+<div class="card"><input type="file" id="f" accept="image/*" capture="user"> <button id="go">Analyze my skin</button>
+<p id="st" class="s"></p><div id="scores"></div></div>
+<div class="card" id="shop" hidden><b>Product checker</b>
+<textarea id="ing" placeholder="Paste the ingredient list from the product page, e.g. Water, Glycerin, Niacinamide, Fragrance, Alcohol Denat..."></textarea>
+<p><button id="chk">Check this product</button></p><div id="out"></div></div>
+<script>
+// Ingredient knowledge base: concern keyword -> helpful / harmful ingredients (simplified, educational).
+const KB={texture:{good:["glycolic","lactic acid","salicylic acid","retinol"],bad:[]},
+dark:{good:["vitamin c","caffeine","niacinamide","retinol"],bad:[]},
+eye:{good:["caffeine","peptide","vitamin k"],bad:["fragrance","parfum"]},
+firm:{good:["peptide","retinol","vitamin c","ascorb"],bad:[]},
+radiance:{good:["vitamin c","ascorb","niacinamide","glycolic"],bad:[]},
+acne:{good:["salicylic acid","niacinamide","zinc","azelaic acid"],bad:["coconut oil","isopropyl myristate","fragrance","parfum"]},
+oil:{good:["niacinamide","salicylic acid","clay","zinc"],bad:["mineral oil","shea butter","coconut oil"]},
+moist:{good:["hyaluronic","glycerin","ceramide","squalane"],bad:["alcohol denat","sodium lauryl sulfate"]},
+pore:{good:["salicylic acid","niacinamide","retinol"],bad:["coconut oil","isopropyl myristate"]},
+wrinkle:{good:["retinol","peptide","vitamin c","ascorb"],bad:[]},
+spot:{good:["vitamin c","ascorb","arbutin","niacinamide","kojic"],bad:[]},
+red:{good:["centella","panthenol","allantoin","aloe"],bad:["fragrance","parfum","alcohol denat","menthol","essential oil"]}};
+let concerns=[];const $=id=>document.getElementById(id);
+const cfile=()=>new Promise(r=>{const x=new FileReader();x.onload=()=>r(x.result);x.readAsDataURL($("f").files[0])});
+// Result shape differs per feature, so we walk the object and take anything with a score. VERIFY against real output.
+function collect(r){const sc={};((r&&r.output)||[]).forEach(o=>{if(typeof o.ui_score==="number")sc[o.type]=o.ui_score});return sc}
+const TIPS={error_src_face_too_small:"Move closer: your face should fill most of the frame.",
+ error_large_face_angle:"Look straight at the camera. Keep your head level, not tilted or turned."};
+$("go").onclick=async()=>{ if(!$("f").files[0])return $("st").textContent="Pick a selfie first (front-facing, good light, no makeup).";
+ $("st").textContent="Analyzing... (10-30 sec)";
+ try{const r=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:await cfile()})});
+ const j=await r.json();if(!r.ok)throw new Error(j.error);
+ const sc=collect(j.results);concerns=[];const stt=((j.results.output||[]).find(o=>o.type==="skin_type"&&o.region==="whole")||{}).skin_type;
+ $("scores").innerHTML=Object.entries(sc).sort((a,b)=>a[1]-b[1]).map(([k,v])=>{const bad=v<75;if(bad)concerns.push(k.toLowerCase());
+  return `<div class="row"><span>${k.replace(/_/g," ")}</span><div class="bar"><i style="width:${v}%;background:${bad?"var(--bad)":"var(--ok)"}"></i></div><b>${v}</b></div>`}).join("");
+ $("st").textContent=(j.demo?"[DEMO DATA] ":"")+(stt?"Skin type: "+stt+". ":"")+(concerns.length?"Your priorities: "+concerns.map(c=>c.replace(/_/g," ")).join(", "):"Skin looks great! Any product is fine.");
+ $("shop").hidden=false}catch(e){const k=Object.keys(TIPS).find(c=>e.message.includes(c));$("st").textContent=k?TIPS[k]:"Error: "+e.message}};
+$("chk").onclick=()=>{const t=$("ing").value.toLowerCase();if(!t.trim())return;let good=new Set(),bad=new Set();
+ concerns.forEach(c=>{for(const k in KB)if(c.includes(k)){KB[k].good.forEach(i=>t.includes(i)&&good.add(i));KB[k].bad.forEach(i=>t.includes(i)&&bad.add(i))}});
+ const sc=good.size-bad.size*2,v=bad.size>=2||sc<0?["Skip",""]:good.size>=2&&!bad.size?["Buy","g"]:["Maybe",""];
+ const tag=(s,c)=>[...s].map(i=>`<span class="tag ${c}">${i}</span>`).join("")||"<span class='s'>none found</span>";
+ $("out").innerHTML=`<div class="verdict">${v[0]}</div><p>Helps your concerns:<br>${tag(good,"g")}</p><p>Could worsen them:<br>${tag(bad,"b")}</p>`};
+</script></main></body></html>
